@@ -1,0 +1,10 @@
+obj-m += clipboard.o 
+KERNEL_TREE=/home/kernel/linux-raspberry
+KERNEL_OUT=$(KERNEL_TREE)
+
+all:
+	make ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- -C $(KERNEL_TREE) -O $(KERNEL_OUT) M=$(PWD) modules
+
+clean:
+	make ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- -C $(KERNEL_TREE) -O $(KERNEL_OUT) M=$(PWD) clean
+
