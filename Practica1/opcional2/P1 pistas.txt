@@ -1,0 +1,48 @@
+PISTAS PRACTICA 1 LINUX
+
+
+
+
+COMO HACER LA write_callback :
+	se va a invocar cuando un usuario haga un echo. (echo add 72 > /proc/modlist)
+	
+	
+
+	-vamos a recibir en write_callback(..., char* buf,int len) ese string : "add 72\n"
+		
+			tenemos que parsear este string controlando con copyfromuser a char kbuf[MAXBUF] controlando que len no sea mayor que maxbuf.
+			verificamos si kbuf devuelve error
+			cerramos el string poniendo un \0 al final del string.
+			
+			if(sscanf(kbuf,"add %i",&n) == 1)
+			{
+				a
+			}
+			else if(sscanf(kbuf,"remove %i",l) == 1)
+			{
+				habrá que eliminar memoria...
+			}
+			else if(strcmp(kbuf,"cleanup\n") == 1)
+			{
+				habrá que eliminar memoria...
+			}
+	
+	
+	en el cat /proc/modlist  -> devolverá 3 42 71
+	
+		
+	iteramos por la lista y construimos el string "3\n42\71\n"
+	
+	en nuestro array local kbuf con cuidado de no desbordar, 
+	read_callback(..., char*buf)
+		
+	list_for_each()
+	{
+		item ...
+		dst +=sprintf(dst,"%d\n",tem->data);
+	}0
+	
+	copy_to_user();
+	comprobar si falla copy_to_user
+	
+	devolver ERROR ENOSPC si el string es demasiado grande y nos vamos a quedar sin memoria
