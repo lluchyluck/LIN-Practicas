@@ -1,0 +1,14 @@
+Pistas practica 2 arquitectura de linux y android
+
+
+Cuidado, el bit más significativo enciende el led de la derecha.
+
+101->011
+100 ->010
+
+
+
+
+Hacer compilacion y edicion del kernel fuera de la maquina virtual en un debian nativo haciendo bootstrap, 
+luego hacer la configuracion dentro de la maquina virtual.
+
