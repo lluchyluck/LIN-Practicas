@@ -1,42 +1,26 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <errno.h>
 #include <unistd.h>
+#include <sys/syscall.h>
 
-#define MIN_MASK 0
-#define MAX_MASK 7
-
-// Prototipo de la llamada al sistema ledctl
-extern long ledctl(unsigned int leds);
+#define SYS_ledctl 452  // Este número debe coincidir con el número que agregaste en syscall_64.tbl
 
 int main(int argc, char *argv[]) {
-    unsigned int mask;
-    long result;
-
-    // Comprobar que el usuario ha pasado un argumento
     if (argc != 2) {
-        fprintf(stderr, "Usage: %s <ledmask>\n", argv[0]);
-        exit(EXIT_FAILURE);
+        fprintf(stderr, "Uso: %s <mask>\n", argv[0]);
+        return 1;
     }
 
-    // Convertir el argumento a un número
-    mask = atoi(argv[1]);
+    unsigned int mask = atoi(argv[1]);
+   
+    
 
-    // Verificar que está en el rango válido (0-7)
-    if (mask < MIN_MASK || mask > MAX_MASK) {
-        fprintf(stderr, "Error: ledmask must be in the range 0-7.\n");
-        exit(EXIT_FAILURE);
-    }
-
-    // Invocar la llamada al sistema
-    result = ledctl(mask);
-
-    // Manejo de errores
+    // Llamar a la syscall ledctl usando su número (SYS_ledctl)
+    long result = syscall(SYS_ledctl, mask);
     if (result == -1) {
-        perror("ledctl failed");
-        exit(EXIT_FAILURE);
+        perror("Error al invocar ledctl");
+        return 1;
     }
 
-    printf("LED state changed successfully.\n");
     return 0;
 }
