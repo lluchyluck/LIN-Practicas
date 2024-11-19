@@ -1,0 +1,1 @@
+cmd_/home/kernel/Escritorio/workspace/LIN-Practicas/practica4/parteB/prodcons.mod := printf '%s\n'   prodcons.o | awk '!x[$$0]++ { print("/home/kernel/Escritorio/workspace/LIN-Practicas/practica4/parteB/"$$0) }' > /home/kernel/Escritorio/workspace/LIN-Practicas/practica4/parteB/prodcons.mod

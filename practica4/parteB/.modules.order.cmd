@@ -1,0 +1,1 @@
+cmd_/home/kernel/Escritorio/workspace/LIN-Practicas/practica4/parteB/modules.order := {   echo /home/kernel/Escritorio/workspace/LIN-Practicas/practica4/parteB/prodcons.o; :; } > /home/kernel/Escritorio/workspace/LIN-Practicas/practica4/parteB/modules.order
