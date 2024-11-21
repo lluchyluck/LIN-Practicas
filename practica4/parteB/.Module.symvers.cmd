@@ -1,1 +1,0 @@
-cmd_/home/kernel/Escritorio/workspace/LIN-Practicas/practica4/parteB/Module.symvers :=  scripts/mod/modpost -m      -o /home/kernel/Escritorio/workspace/LIN-Practicas/practica4/parteB/Module.symvers -T /home/kernel/Escritorio/workspace/LIN-Practicas/practica4/parteB/modules.order -i Module.symvers -e 

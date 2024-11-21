@@ -14,17 +14,18 @@ MODULE_DESCRIPTION("Módulo ProdCons con buffer circular y semáforos");
 #define BUFFER_SIZE 4 // Tamaño máximo del buffer en enteros (4 enteros x 4 bytes)
 
 static struct kfifo fifo_buffer;
-static struct semaphore mutex;     // Exclusión mutua
-static struct semaphore espacios;  // Espacios disponibles en el buffer
-static struct semaphore elementos; // Elementos disponibles en el buffer
+
+static DEFINE_SEMAPHORE(elementos); 
+static DEFINE_SEMAPHORE(huecos);
+static DEFINE_SPINLOCK(mutex);
 
 static int prodcons_major;
 static struct class *prodcons_class = NULL;
 static struct device *prodcons_device = NULL;
-static atomic_t open_count = ATOMIC_INIT(0);
 
 // Inserta un número en el buffer
 static void insertar_entero(int num) {
+
     kfifo_in(&fifo_buffer, &num, sizeof(int));
 }
 
@@ -51,18 +52,20 @@ static ssize_t prodcons_write(struct file *file, const char __user *ubuf, size_t
     if (kstrtoint(kbuf, 10, &num) != 0)
         return -EINVAL;
 
-    // Bloquear si no hay espacio en el buffer
-    if (down_interruptible(&espacios))
-        return -ERESTARTSYS;
+    if (down_interruptible(&huecos))
+        return -EINTR;
 
-    // Acceso exclusivo al buffer
-    if (down_interruptible(&mutex))
-        return -ERESTARTSYS;
+    /* Entrar a la SC */
+    if (down_interruptible(&mtx)) {
+    up(&huecos);
+    return -EINTR;
+    }
 
     insertar_entero(num);
 
-    up(&mutex);      // Liberar el mutex
-    up(&elementos);  // Incrementar el número de elementos disponibles
+    /* Salir de la SC */
+    up(&mtx);
+    up(&elementos);
 
     return count;
 }
@@ -73,23 +76,25 @@ static ssize_t prodcons_read(struct file *file, char __user *ubuf, size_t count,
     char kbuf[16];
     int len;
 
+    if (down_interruptible(&elementos))
+        return -EINTR;
+
+    /* Entrar a la SC */
+    if (down_interruptible(&mtx)){
+        up(&elementos);
+        return -EINTR;
+    }
+
     if(kfifo_is_empty(&fifo_buffer)!= 0)
     {
         return -ERESTARTSYS;
     }
 
-    // Bloquear si no hay elementos en el buffer
-    if (down_interruptible(&elementos))
-        return -ERESTARTSYS;
-
-    // Acceso exclusivo al buffer
-    if (down_interruptible(&mutex))
-        return -ERESTARTSYS;
-
     num = extraer_entero();
 
-    up(&mutex);     // Liberar el mutex
-    up(&espacios);  // Incrementar los espacios disponibles
+    /* Salir de la SC */
+    up(&mtx);
+    up(&huecos);
 
     len = snprintf(kbuf, sizeof(kbuf), "%d\n", num);
     if (copy_to_user(ubuf, kbuf, len))
@@ -123,16 +128,15 @@ static const struct file_operations prodcons_fops = {
 static int __init prodcons_init(void) {
     int ret;
 
+    semaphore_init(huecos,0);
+    semaphore_init(elementos,0);
+    semaphore_init(mutex,1);
+    
     // Inicializar el buffer circular
     if (kfifo_alloc(&fifo_buffer, BUFFER_SIZE * sizeof(int), GFP_KERNEL)) {
         printk(KERN_ERR "Error al inicializar el buffer circular\n");
         return -ENOMEM;
     }
-
-    // Inicializar los semáforos
-    sema_init(&mutex, 1);            // Mutex inicializado en 1
-    sema_init(&espacios, BUFFER_SIZE); // Espacios inicializados al tamaño máximo
-    sema_init(&elementos, 0);        // No hay elementos inicialmente
 
     // Registrar el dispositivo de caracteres
     prodcons_major = register_chrdev(0, DEVICE_NAME, &prodcons_fops);
