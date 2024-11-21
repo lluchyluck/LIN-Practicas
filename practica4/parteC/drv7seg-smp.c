@@ -9,8 +9,8 @@
 #include <asm/uaccess.h>
 #include <asm/errno.h>
 
-MODULE_DESCRIPTION("Display7s SMP-Safe and Thread-Safe Driver");
-MODULE_AUTHOR("Modificado por asistente AI");
+MODULE_DESCRIPTION("Display7s sincro");
+MODULE_AUTHOR("Lucas Calzada y Juan Girón");
 MODULE_LICENSE("GPL");
 
 #define DS_A 0x80
@@ -48,10 +48,10 @@ const int display_gpio[] = {18, 23, 24};
 struct gpio_desc *gpio_descriptors[NR_GPIO_DISPLAY];
 
 /* Sincronización */
-static DEFINE_SEMAPHORE(device_sem);      // Control de acceso exclusivo
+static DEFINE_SEMAPHORE(sem_OR);      // Control de acceso exclusivo
 static DEFINE_MUTEX(write_mutex);         // Exclusión mutua para `write()`
-static DEFINE_SPINLOCK(ref_count_lock);   // Protección para contador de referencias
-static int device_ref_count = 0;          // Contador de referencias
+static DEFINE_SPINLOCK(spin_count);   // Protección para contador de referencias
+static int contador_referencias = 0;          // Contador de referencias
 
 
 static void update_7sdisplay(unsigned char data)
@@ -104,23 +104,23 @@ static ssize_t display7s_write(struct file *filp, const char *buff, size_t len, 
 
 static int display7s_open(struct inode *inode, struct file *file)
 {
-    if (down_interruptible(&device_sem))
+    if (down_interruptible(&sem_OR))
         return -EBUSY;
 
-    spin_lock(&ref_count_lock);
-    device_ref_count++;
-    spin_unlock(&ref_count_lock);
+    spin_lock(&spin_count);
+    contador_referencias++;
+    spin_unlock(&spin_count);
 
     return 0;
 }
 
 static int display7s_release(struct inode *inode, struct file *file)
 {
-    spin_lock(&ref_count_lock);
-    device_ref_count--;
-    spin_unlock(&ref_count_lock);
+    spin_lock(&spin_count);
+    contador_referencias--;
+    spin_unlock(&spin_count);
 
-    up(&device_sem);
+    up(&sem_OR);
     return 0;
 }
 
@@ -164,13 +164,13 @@ static void __exit display7s_misc_exit(void)
 {
     int i;
 
-    spin_lock(&ref_count_lock);
-    if (device_ref_count > 0) {
-        spin_unlock(&ref_count_lock);
+    spin_lock(&spin_count);
+    if (contador_referencias > 0) {
+        spin_unlock(&spin_count);
         pr_err("Device is in use. Cannot unload module.\n");
         return;
     }
-    spin_unlock(&ref_count_lock);
+    spin_unlock(&spin_count);
 
     misc_deregister(&display7s_misc);
 
