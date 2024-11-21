@@ -29,12 +29,10 @@ MODULE_INFO(retpoline, "Y");
 
 static const struct modversion_info ____versions[]
 __used __section("__versions") = {
-	{ 0x13c49cc2, "_copy_from_user" },
 	{ 0x8c8569cb, "kstrtoint" },
 	{ 0x6bd0e573, "down_interruptible" },
 	{ 0xf23fcb99, "__kfifo_in" },
 	{ 0xcf2a6966, "up" },
-	{ 0x5b8239ca, "__x86_return_thunk" },
 	{ 0xa19b956, "__stack_chk_fail" },
 	{ 0x13d0adf7, "__kfifo_out" },
 	{ 0x656e4a6e, "snprintf" },
@@ -49,7 +47,9 @@ __used __section("__versions") = {
 	{ 0x91c216f5, "class_destroy" },
 	{ 0x67d81e0e, "device_destroy" },
 	{ 0xbdfb6dbb, "__fentry__" },
+	{ 0x5b8239ca, "__x86_return_thunk" },
 	{ 0x88db9f48, "__check_object_size" },
+	{ 0x13c49cc2, "_copy_from_user" },
 	{ 0x43296262, "module_layout" },
 };
 

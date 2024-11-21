@@ -21,6 +21,7 @@ static struct semaphore elementos; // Elementos disponibles en el buffer
 static int prodcons_major;
 static struct class *prodcons_class = NULL;
 static struct device *prodcons_device = NULL;
+static atomic_t open_count = ATOMIC_INIT(0);
 
 // Inserta un número en el buffer
 static void insertar_entero(int num) {
@@ -72,6 +73,11 @@ static ssize_t prodcons_read(struct file *file, char __user *ubuf, size_t count,
     char kbuf[16];
     int len;
 
+    if(kfifo_is_empty(&fifo_buffer)!= 0)
+    {
+        return -ERESTARTSYS;
+    }
+
     // Bloquear si no hay elementos en el buffer
     if (down_interruptible(&elementos))
         return -ERESTARTSYS;
@@ -92,11 +98,25 @@ static ssize_t prodcons_read(struct file *file, char __user *ubuf, size_t count,
     return len;
 }
 
+// Operación open para controlar procesos
+static int prodcons_open(struct inode *inode, struct file *file) {
+    atomic_inc(&open_count);
+    return 0;
+}
+
+// Operación release para liberar recursos
+static int prodcons_release(struct inode *inode, struct file *file) {
+    atomic_dec(&open_count);
+    return 0;
+}
+
 // Operaciones soportadas por el dispositivo
 static const struct file_operations prodcons_fops = {
     .owner = THIS_MODULE,
     .write = prodcons_write,
     .read = prodcons_read,
+    .open = prodcons_open,
+    .release = prodcons_release,
 };
 
 // Inicialización del módulo
@@ -144,6 +164,11 @@ static int __init prodcons_init(void) {
 
 // Finalización del módulo
 static void __exit prodcons_exit(void) {
+    if (atomic_read(&open_count) > 0) {
+        printk(KERN_ERR "No se puede descargar el módulo: procesos abiertos\n");
+        return;
+    }
+
     device_destroy(prodcons_class, MKDEV(prodcons_major, 0));
     class_destroy(prodcons_class);
     unregister_chrdev(prodcons_major, DEVICE_NAME);
