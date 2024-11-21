@@ -104,6 +104,8 @@ static ssize_t display7s_write(struct file *filp, const char *buff, size_t len, 
 
 static int display7s_open(struct inode *inode, struct file *file)
 {
+    if(!try_module_get(THIS_MODULE))
+        return -EBUSY;
     if (down_interruptible(&sem_OR))
         return -EBUSY;
 
@@ -116,10 +118,11 @@ static int display7s_open(struct inode *inode, struct file *file)
 
 static int display7s_release(struct inode *inode, struct file *file)
 {
+    module_put(THIS_MODULE);
     spin_lock(&spin_count);
     contador_referencias--;
     spin_unlock(&spin_count);
-
+    
     up(&sem_OR);
     return 0;
 }
