@@ -1,10 +1,15 @@
-#include <linux/module.h>
+
 #include <linux/kernel.h>
-#include <linux/fs.h>
-#include <linux/uaccess.h>
-#include <linux/kfifo.h>
+#include <linux/module.h>
+#include <linux/miscdevice.h>
+#include <linux/gpio.h>
+#include <linux/delay.h>
+#include <linux/mutex.h>
 #include <linux/semaphore.h>
-#include <linux/cdev.h>
+#include <linux/spinlock.h>
+#include <asm/uaccess.h>
+#include <asm/errno.h>
+#include <linux/kfifo.h>
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Juan y Lucas");
@@ -15,13 +20,11 @@ MODULE_DESCRIPTION("Módulo ProdCons con buffer circular y semáforos");
 
 static struct kfifo fifo_buffer;
 
-static DEFINE_SEMAPHORE(elementos); 
-static DEFINE_SEMAPHORE(huecos);
-static DEFINE_SPINLOCK(mutex);
+struct semaphore elementos,huecos, mtx;
 
-static int prodcons_major;
-static struct class *prodcons_class = NULL;
-static struct device *prodcons_device = NULL;
+static DEFINE_SPINLOCK(spin_count);   // Protección para contador de referencias
+static int contador_referencias = 0;          // Contador de referencias
+
 
 // Inserta un número en el buffer
 static void insertar_entero(int num) {
@@ -31,8 +34,8 @@ static void insertar_entero(int num) {
 
 // Extrae un número del buffer
 static int extraer_entero(void) {
-    int num;
-    kfifo_out(&fifo_buffer, &num, sizeof(int));
+    int num, ret;
+    ret = kfifo_out(&fifo_buffer, &num, sizeof(int));
     return num;
 }
 
@@ -76,6 +79,11 @@ static ssize_t prodcons_read(struct file *file, char __user *ubuf, size_t count,
     char kbuf[16];
     int len;
 
+    if(kfifo_is_empty(&fifo_buffer))
+    {
+        return 0;
+    }
+
     if (down_interruptible(&elementos))
         return -EINTR;
 
@@ -83,11 +91,6 @@ static ssize_t prodcons_read(struct file *file, char __user *ubuf, size_t count,
     if (down_interruptible(&mtx)){
         up(&elementos);
         return -EINTR;
-    }
-
-    if(kfifo_is_empty(&fifo_buffer)!= 0)
-    {
-        return -ERESTARTSYS;
     }
 
     num = extraer_entero();
@@ -105,13 +108,22 @@ static ssize_t prodcons_read(struct file *file, char __user *ubuf, size_t count,
 
 // Operación open para controlar procesos
 static int prodcons_open(struct inode *inode, struct file *file) {
-    atomic_inc(&open_count);
+    if (!try_module_get(THIS_MODULE))  // Incrementa contador de referencia
+        return -EBUSY;
+
+    spin_lock(&spin_count);
+    contador_referencias++;
+    spin_unlock(&spin_count);
     return 0;
 }
 
 // Operación release para liberar recursos
 static int prodcons_release(struct inode *inode, struct file *file) {
-    atomic_dec(&open_count);
+    spin_lock(&spin_count);
+    contador_referencias--;
+    spin_unlock(&spin_count);
+
+    module_put(THIS_MODULE);  // Decrementa contador de referencia
     return 0;
 }
 
@@ -124,42 +136,34 @@ static const struct file_operations prodcons_fops = {
     .release = prodcons_release,
 };
 
+/* Dispositivo misc */
+static struct miscdevice prodcons_misc = {
+    .minor = MISC_DYNAMIC_MINOR,
+    .name = "prodcons",
+    .fops = &prodcons_fops,
+    .mode = 0666,
+};
+
 // Inicialización del módulo
 static int __init prodcons_init(void) {
-    int ret;
 
-    semaphore_init(huecos,0);
-    semaphore_init(elementos,0);
-    semaphore_init(mutex,1);
-    
+    int err;
+
+    sema_init(&huecos,BUFFER_SIZE);
+    sema_init(&elementos, 0);
+    sema_init(&mtx,1);
+
     // Inicializar el buffer circular
     if (kfifo_alloc(&fifo_buffer, BUFFER_SIZE * sizeof(int), GFP_KERNEL)) {
         printk(KERN_ERR "Error al inicializar el buffer circular\n");
         return -ENOMEM;
     }
 
-    // Registrar el dispositivo de caracteres
-    prodcons_major = register_chrdev(0, DEVICE_NAME, &prodcons_fops);
-    if (prodcons_major < 0) {
-        printk(KERN_ERR "Error al registrar el dispositivo\n");
+    err = misc_register(&prodcons_misc);
+    if (err)
+    {
         kfifo_free(&fifo_buffer);
-        return prodcons_major;
-    }
-
-    // Crear clase y dispositivo
-    prodcons_class = class_create(THIS_MODULE, DEVICE_NAME);
-    if (IS_ERR(prodcons_class)) {
-        unregister_chrdev(prodcons_major, DEVICE_NAME);
-        kfifo_free(&fifo_buffer);
-        return PTR_ERR(prodcons_class);
-    }
-
-    prodcons_device = device_create(prodcons_class, NULL, MKDEV(prodcons_major, 0), NULL, DEVICE_NAME);
-    if (IS_ERR(prodcons_device)) {
-        class_destroy(prodcons_class);
-        unregister_chrdev(prodcons_major, DEVICE_NAME);
-        kfifo_free(&fifo_buffer);
-        return PTR_ERR(prodcons_device);
+        return err;
     }
 
     printk(KERN_INFO "ProdCons: módulo cargado con éxito\n");
@@ -168,14 +172,17 @@ static int __init prodcons_init(void) {
 
 // Finalización del módulo
 static void __exit prodcons_exit(void) {
-    if (atomic_read(&open_count) > 0) {
-        printk(KERN_ERR "No se puede descargar el módulo: procesos abiertos\n");
+
+    spin_lock(&spin_count);
+    if (contador_referencias > 0) {
+        spin_unlock(&spin_count);
+        pr_err("Device is in use. Cannot unload module.\n");
         return;
     }
+    spin_unlock(&spin_count);
 
-    device_destroy(prodcons_class, MKDEV(prodcons_major, 0));
-    class_destroy(prodcons_class);
-    unregister_chrdev(prodcons_major, DEVICE_NAME);
+
+    misc_deregister(&prodcons_misc);
     kfifo_free(&fifo_buffer);
 
     printk(KERN_INFO "ProdCons: módulo descargado con éxito\n");

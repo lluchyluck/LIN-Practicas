@@ -1,0 +1,5 @@
+sudo rmmod prodcons && make && sudo insmod prodcons.ko
+
+
+echo 5 > /dev/prodcons
+cat /dev/prodcons
