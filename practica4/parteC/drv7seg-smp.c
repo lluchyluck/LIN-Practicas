@@ -103,8 +103,7 @@ static ssize_t display7s_write(struct file *filp, const char *buff, size_t len, 
 
 static int display7s_open(struct inode *inode, struct file *file)
 {
-    if(!try_module_get(THIS_MODULE)) // este fuera
-        return -EBUSY;
+
     spin_lock(&spin_count);
     if(contador_aperturas == 0){
         contador_aperturas++;
@@ -112,6 +111,7 @@ static int display7s_open(struct inode *inode, struct file *file)
     else
         return -EBUSY;
     spin_unlock(&spin_count);
+    try_module_get(THIS_MODULE);
 
     return 0;
 }
