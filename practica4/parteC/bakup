@@ -48,9 +48,10 @@ const int display_gpio[] = {18, 23, 24};
 struct gpio_desc *gpio_descriptors[NR_GPIO_DISPLAY];
 
 /* Sincronización */
+static DEFINE_SEMAPHORE(sem_OR);      // Control de acceso exclusivo
 static DEFINE_MUTEX(write_mutex);         // Exclusión mutua para `write()`
 static DEFINE_SPINLOCK(spin_count);   // Protección para contador de referencias
-static int contador_aperturas = 0;          // Contador de referencias
+static int contador_referencias = 0;          // Contador de referencias
 
 
 static void update_7sdisplay(unsigned char data)
@@ -105,12 +106,11 @@ static int display7s_open(struct inode *inode, struct file *file)
 {
     if(!try_module_get(THIS_MODULE)) // este fuera
         return -EBUSY;
-    spin_lock(&spin_count);
-    if(contador_aperturas == 0){
-        contador_aperturas++;
-    }
-    else
+    if (down_interruptible(&sem_OR)) // semaforo fuera, exclusion diferente
         return -EBUSY;
+
+    spin_lock(&spin_count);
+    contador_referencias++;
     spin_unlock(&spin_count);
 
     return 0;
@@ -120,9 +120,10 @@ static int display7s_release(struct inode *inode, struct file *file)
 {
     module_put(THIS_MODULE);
     spin_lock(&spin_count);
-    contador_aperturas--;
+    contador_referencias--;
     spin_unlock(&spin_count);
     
+    up(&sem_OR);
     return 0;
 }
 
@@ -167,7 +168,7 @@ static void __exit display7s_misc_exit(void)
     int i;
 
     spin_lock(&spin_count);
-    if (contador_aperturas > 0) {
+    if (contador_referencias > 0) {
         spin_unlock(&spin_count);
         pr_err("Device is in use. Cannot unload module.\n");
         return;

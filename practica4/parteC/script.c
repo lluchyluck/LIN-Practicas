@@ -2,38 +2,37 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <stdlib.h>
+#include <string.h>
 
 int main() {
-    int fd;
-    char c;
-    
-    // Abrir el dispositivo /dev/display7s
-    fd = open("/dev/display7s", O_WRONLY);
+    const char characters[] = "0123456789abcdefABCDEF";
+    const size_t num_chars = sizeof(characters) - 1; // Exclude null terminator
+    const char *device_path = "/dev/display7s";
+    char buffer[3]; // Espacio para carácter, '\n' y '\0'
+
+    // Abre el dispositivo para escritura
+    int fd = open(device_path, O_WRONLY);
     if (fd == -1) {
         perror("Error al abrir el dispositivo");
-        exit(EXIT_FAILURE);
+        return EXIT_FAILURE;
     }
 
-    // Bucle infinito
-    while (1) {
-        // Enviar los caracteres del 0 al 9, a-f, A-F
-        for (c = '0'; c <= '9'; c++) {
-            write(fd, &c, 1);
-            usleep(400000);  // 0.4 segundos
-        }
-        
-        for (c = 'a'; c <= 'f'; c++) {
-            write(fd, &c, 1);
-            usleep(400000);  // 0.4 segundos
-        }
-        
-        for (c = 'A'; c <= 'F'; c++) {
-            write(fd, &c, 1);
-            usleep(400000);  // 0.4 segundos
+    while (1) { // Bucle infinito
+        for (size_t i = 0; i < num_chars; i++) {
+            // Prepara el buffer con el carácter seguido de '\n'
+            snprintf(buffer, sizeof(buffer), "%c\n", characters[i]);
+
+            // Escribe el carácter en el dispositivo
+            if (write(fd, buffer, strlen(buffer)) == -1) {
+                perror("Error al escribir en el dispositivo");
+                close(fd);
+                return EXIT_FAILURE;
+            }
+            usleep(400000); // Pausa de 0.4 segundos
         }
     }
 
-    // Cerrar el dispositivo
+    // Cierra el dispositivo (nunca se alcanza en este código)
     close(fd);
-    return 0;
+    return EXIT_SUCCESS;
 }
