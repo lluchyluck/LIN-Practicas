@@ -79,10 +79,13 @@ static ssize_t prodcons_read(struct file *file, char __user *ubuf, size_t count,
     char kbuf[16];
     int len;
 
-    if(kfifo_is_empty(&fifo_buffer))
+    if ((*ppos) > 0) /* Tell the application that there is nothing left to read */
+        return 0;
+
+    /*if(kfifo_is_empty(&fifo_buffer))
     {
         return 0;
-    }
+    }*/
 
     if (down_interruptible(&elementos))
         return -EINTR;
@@ -102,6 +105,8 @@ static ssize_t prodcons_read(struct file *file, char __user *ubuf, size_t count,
     len = snprintf(kbuf, sizeof(kbuf), "%d\n", num);
     if (copy_to_user(ubuf, kbuf, len))
         return -EFAULT;
+
+    (*ppos) += len; /* Update the file pointer */
 
     return len;
 }
