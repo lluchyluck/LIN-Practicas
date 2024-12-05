@@ -1,0 +1,18 @@
+pistas practica buzzer
+
+4 flujos impredecibles
+
+	* reproduce los sonidos una tarea diferida implementada con workqueues , un kernel thread
+
+	* la temporización la maneja un timer del kernel ( contexto de interrupcion)
+
+	* pulsador (interrupcion)
+
+	* fichero /dev/buzzer
+
+el fichero parsea y contiene el array con la melodía, llama al work queue para que haga sonar la melodia hasta que el timer se active.
+En cualquier momento el pulsador puede interrumpir la ejecucion de la melodia.
+
+
+timer -> (queue)     -> work queue
+      <- (nod_timer) <-
