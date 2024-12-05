@@ -7,6 +7,7 @@
 #include <linux/pwm.h>
 #include <linux/workqueue.h>
 #include <linux/delay.h>
+#include <linux/timer.h>
 
 MODULE_DESCRIPTION("Test-buzzer Kernel Module - FDI-UCM");
 MODULE_AUTHOR("Juan Carlos Saez");
@@ -24,6 +25,7 @@ MODULE_LICENSE("GPL");
 
 struct pwm_device *pwm_device = NULL;
 struct pwm_state pwm_state;
+struct timer_list my_timer; /* Structure that describes the kernel timer */
 
 /* Work descriptor */
 struct work_struct my_work;
@@ -86,6 +88,23 @@ static inline int calculate_delay_ms(unsigned int note_len, unsigned int qnote_r
 	return total;
 }
 
+
+/* Function invoked when timer expires (fires) */
+static void fire_timer(struct timer_list *timer)
+{
+    static char flag = 0;
+    char* message[] = {"Tic", "Tac"};
+
+    if (flag == 0)
+        printk(KERN_INFO "%s\n", message[0]);
+    else
+        printk(KERN_INFO "%s\n", message[1]);
+
+    flag = ~flag;
+
+    /* Re-activate the timer one second from now */
+    mod_timer(timer, jiffies + HZ);
+}
 
 /* Work's handler function */
 static void my_wq_function(struct work_struct *work)
