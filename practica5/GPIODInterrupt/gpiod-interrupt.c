@@ -89,7 +89,7 @@ static int __init gpioint_init(void)
   }
 
   gpio_out_ok = 1;
-
+  
   //configure the BUTTON GPIO as input
   gpiod_direction_input(desc_button);
 
