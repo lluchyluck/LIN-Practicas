@@ -5,21 +5,25 @@
 #include <linux/timer.h>
 #include <linux/jiffies.h>
 
-#define TIMER_PERIOD_MS 100
 
+//TIMER
+#define TIMER_PERIOD_MS 100
+//LEDS
+#define NR_GPIO_LEDS 3
 #define ALL_LEDS_ON 0x7
 #define ALL_LEDS_OFF 0
-
-#define MANUAL_DEBOUNCE
-
-#define NR_GPIO_LEDS 3
-
 const int led_gpio[NR_GPIO_LEDS] = {25, 27, 4};
-
+struct gpio_desc *gpio_descriptors[NR_GPIO_LEDS] = { NULL };
 int ledCounter = 0;
+static int led_state = 0;
 
-/* Array to hold gpio descriptors */
-struct gpio_desc *gpio_descriptors[NR_GPIO_LEDS];
+//BOTON
+#define MANUAL_DEBOUNCE
+#define GPIO_BUTTON 22
+struct gpio_desc *desc_button = NULL;
+static int gpio_button_irqn = -1;
+
+
 
 static struct timer_list my_timer;
 
@@ -57,10 +61,9 @@ static void fire_timer(struct timer_list *timer)
     static char flag = 0;
     flag = ~flag;
 
-    printk(KERN_INFO "Timer fired! Flag toggled to: %d\n", flag);
-
     set_pi_leds(ledCounter);
-    ledCounter++;
+    ledCounter = (ledCounter + 1) % (1 << NR_GPIO_LEDS);
+
 
     mod_timer(timer, jiffies + msecs_to_jiffies(TIMER_PERIOD_MS));
 }
