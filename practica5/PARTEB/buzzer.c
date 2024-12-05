@@ -23,6 +23,8 @@ MODULE_LICENSE("GPL");
 
 #define PWM_DEVICE_NAME "pwmchip0"
 
+#define MANUAL_DEBOUNCE
+
 struct pwm_device *pwm_device = NULL;
 struct pwm_state pwm_state;
 struct timer_list my_timer; /* Structure that describes the kernel timer */
@@ -106,6 +108,24 @@ static void fire_timer(struct timer_list *timer)
     mod_timer(timer, jiffies + HZ);
 }
 
+
+/* Interrupt handler for button **/
+static irqreturn_t gpio_irq_handler(int irq, void *dev_id)
+{
+#ifdef MANUAL_DEBOUNCE
+  static unsigned long last_interrupt = 0;
+  unsigned long diff = jiffies - last_interrupt;
+  if (diff < 20)
+    return IRQ_HANDLED;
+
+  last_interrupt = jiffies;
+#endif
+
+  //led_state = ~led_state & ALL_LEDS_ON;
+  //set_pi_leds(led_state);
+  return IRQ_HANDLED;
+}
+
 /* Work's handler function */
 static void my_wq_function(struct work_struct *work)
 {
@@ -147,6 +167,90 @@ static void my_wq_function(struct work_struct *work)
 	}
 
 	pwm_disable(pwm_device);
+}
+
+static int __init gpioint_init(void)
+{
+  int i, j;
+  int err = 0;
+  unsigned char gpio_out_ok = 0;
+
+
+
+  /* Requesting Button's GPIO */
+  if ((err = gpio_request(GPIO_BUTTON, "button"))) {
+    pr_err("ERROR: GPIO %d request\n", GPIO_BUTTON);
+    goto err_handle;
+  }
+
+  /* Configure Button */
+  if (!(desc_button = gpio_to_desc(GPIO_BUTTON))) {
+    pr_err("GPIO %d is not valid\n", GPIO_BUTTON);
+    err = -EINVAL;
+    goto err_handle;
+  }
+
+  gpio_out_ok = 1;
+
+  //configure the BUTTON GPIO as input
+  gpiod_direction_input(desc_button);
+
+  /*
+  ** The lines below are commented because gpiod_set_debounce is not supported
+  ** in the Raspberry pi. Debounce is handled manually in this driver.
+  */
+#ifndef MANUAL_DEBOUNCE
+  //Debounce the button with a delay of 200ms
+  if (gpiod_set_debounce(desc_button, 200) < 0) {
+    pr_err("ERROR: gpio_set_debounce - %d\n", GPIO_BUTTON);
+    goto err_handle;
+  }
+#endif
+
+  //Get the IRQ number for our GPIO
+  gpio_button_irqn = gpiod_to_irq(desc_button);
+  pr_info("IRQ Number = %d\n", gpio_button_irqn);
+
+  if (request_irq(gpio_button_irqn,             //IRQ number
+                  gpio_irq_handler,   //IRQ handler
+                  IRQF_TRIGGER_RISING,        //Handler will be called in raising edge
+                  "button_leds",               //used to identify the device name using this IRQ
+                  NULL)) {                    //device id for shared IRQ
+    pr_err("my_device: cannot register IRQ ");
+    goto err_handle;
+  }
+
+  return 0;
+err_handle:
+
+  if (gpio_out_ok)
+    gpiod_put(desc_button);
+
+  return err;
+}
+
+static void __exit gpioint_exit(void) {
+  int i = 0;
+
+  free_irq(gpio_button_irqn, NULL);
+
+  gpiod_put(desc_button);
+}
+
+int init_timer_module( void )
+{
+    /* Create timer */
+    timer_setup(&my_timer, fire_timer, 0);
+    my_timer.expires = jiffies + HZ; /* Activate it one second from now */
+    /* Activate the timer for the first time */
+    add_timer(&my_timer);
+    return 0;
+}
+
+
+void cleanup_timer_module( void ) {
+    /* Wait until completion of the timer function (if it's currently running) and delete timer */
+    del_timer_sync(&my_timer);
 }
 
 static int __init pwm_module_init(void)
