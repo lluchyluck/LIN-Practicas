@@ -10,7 +10,7 @@
 
 static int timer_period_ms = 0;
 
-/* module_param(periodo, int, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH); */
+/* module_param(timer_period_ms, int, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH); */
  module_param(timer_period_ms, int, 0000);
 MODULE_PARM_DESC(timer_period_ms, "periodo del temporizador (ms)");
 
@@ -81,6 +81,11 @@ int init_timerleds(void)
     int err = 0;
     char gpio_str[10];
     unsigned char gpio_out_ok = 0;
+
+    if (timer_period_ms <= 0) {
+        pr_err("Invalid timer_period_ms: must be > 0\n");
+        return -EINVAL;
+    }
 
     printk(KERN_INFO "Initializing timerleds module...\n");
 	printk(KERN_INFO "timer_period_ms is : %d\n", timer_period_ms);
