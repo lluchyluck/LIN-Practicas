@@ -64,7 +64,7 @@ static void fire_timer(struct timer_list *timer)
     set_pi_leds(ledCounter);
     ledCounter = (ledCounter + 1) % (1 << NR_GPIO_LEDS);
 
-
+    
     mod_timer(timer, jiffies + msecs_to_jiffies(TIMER_PERIOD_MS));
 }
 
