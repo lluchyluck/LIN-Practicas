@@ -1,0 +1,1 @@
+sudo insmod timerleds.ko timer_period_ms=500

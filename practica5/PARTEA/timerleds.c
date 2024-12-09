@@ -3,27 +3,31 @@
 #include <linux/proc_fs.h>
 #include <linux/string.h>
 #include <linux/timer.h>
+#include <linux/gpio.h>
 #include <linux/jiffies.h>
+#include <linux/interrupt.h>
+#include <linux/moduleparam.h>
 
+static int timer_period_ms = 0;
 
-//TIMER
-#define TIMER_PERIOD_MS 100
-//LEDS
+/* module_param(periodo, int, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH); */
+ module_param(timer_period_ms, int, 0000);
+MODULE_PARM_DESC(timer_period_ms, "periodo del temporizador (ms)");
+
+// LEDS
 #define NR_GPIO_LEDS 3
 #define ALL_LEDS_ON 0x7
 #define ALL_LEDS_OFF 0
 const int led_gpio[NR_GPIO_LEDS] = {25, 27, 4};
-struct gpio_desc *gpio_descriptors[NR_GPIO_LEDS] = { NULL };
+struct gpio_desc *gpio_descriptors[NR_GPIO_LEDS] = {NULL};
 int ledCounter = 0;
 static int led_state = 0;
 
-//BOTON
+// BOTON
 #define MANUAL_DEBOUNCE
 #define GPIO_BUTTON 22
 struct gpio_desc *desc_button = NULL;
 static int gpio_button_irqn = -1;
-
-
 
 static struct timer_list my_timer;
 
@@ -46,11 +50,14 @@ static irqreturn_t gpio_irq_handler(int irq, void *dev_id)
     last_interrupt = jiffies;
 #endif
     // Detener el temporizador
-    if (timer_pending(&my_timer)) {
+    if (timer_pending(&my_timer))
+    {
         del_timer_sync(&my_timer);
         printk(KERN_INFO "Timer stopped by button press.\n");
-    }else{
-        mod_timer(&my_timer, jiffies + msecs_to_jiffies(TIMER_PERIOD_MS));
+    }
+    else
+    {
+        mod_timer(&my_timer, jiffies + msecs_to_jiffies(timer_period_ms));
         printk(KERN_INFO "Timer reactivated by button press.\n");
     }
     return IRQ_HANDLED;
@@ -64,23 +71,24 @@ static void fire_timer(struct timer_list *timer)
     set_pi_leds(ledCounter);
     ledCounter = (ledCounter + 1) % (1 << NR_GPIO_LEDS);
 
-    
-    mod_timer(timer, jiffies + msecs_to_jiffies(TIMER_PERIOD_MS));
+    mod_timer(timer, jiffies + msecs_to_jiffies(timer_period_ms));
 }
 
 int init_timerleds(void)
 {
-    printk(KERN_INFO "Initializing timerleds module...\n");
-
-    timer_setup(&my_timer, fire_timer, 0);
-    my_timer.expires = jiffies + msecs_to_jiffies(TIMER_PERIOD_MS);
-
-    add_timer(&my_timer);
-
-    int i, j;
+    int i;
+    int j;
     int err = 0;
     char gpio_str[10];
     unsigned char gpio_out_ok = 0;
+
+    printk(KERN_INFO "Initializing timerleds module...\n");
+	printk(KERN_INFO "timer_period_ms is : %d\n", timer_period_ms);
+
+    timer_setup(&my_timer, fire_timer, 0);
+    my_timer.expires = jiffies + msecs_to_jiffies(timer_period_ms);
+
+    add_timer(&my_timer);
 
     for (i = 0; i < NR_GPIO_LEDS; i++)
     {
@@ -165,11 +173,11 @@ err_handle:
 
 void cleanup_timerleds(void)
 {
+    int i = 0;
+
     printk(KERN_INFO "Cleaning up timerleds module...\n");
 
     del_timer_sync(&my_timer);
-
-    int i = 0;
 
     free_irq(gpio_button_irqn, NULL);
     set_pi_leds(ALL_LEDS_OFF);
