@@ -7,57 +7,23 @@
 #include <linux/pwm.h>
 #include <linux/workqueue.h>
 #include <linux/delay.h>
-#include <linux/timer.h>
+#include <linux/slab.h>
+#include <linux/miscdevice.h>
 
-MODULE_DESCRIPTION("Test-buzzer Kernel Module - FDI-UCM");
-MODULE_AUTHOR("Juan Carlos Saez");
-MODULE_LICENSE("GPL");
-
-/* Frequency of selected notes in centihertz */
-#define C4 26163
-#define D4 29366
-#define E4 32963
-#define F4 34923
-#define G4 39200
-#define C5 52325
-
+#define DEVICE_NAME "buzzer"
 #define PWM_DEVICE_NAME "pwmchip0"
-
-#define MANUAL_DEBOUNCE
 
 struct pwm_device *pwm_device = NULL;
 struct pwm_state pwm_state;
-struct timer_list my_timer; /* Structure that describes the kernel timer */
+static char *melody_buffer;
+static struct mutex buzzer_mutex;
+static struct work_struct my_work;
 
-/* Work descriptor */
-struct work_struct my_work;
-
-/* Structure to represent a note or rest in a melodic line  */
-struct music_step
-{
-	unsigned int freq : 24; /* Frequency in centihertz */
-	unsigned int len : 8;	/* Duration of the note */
+struct music_step {
+    int frequency;
+    int duration;
 };
 
-/* Transform frequency in centiHZ into period in nanoseconds */
-static inline unsigned int freq_to_period_ns(unsigned int frequency)
-{
-	if (frequency == 0)
-		return 0;
-	else
-		return DIV_ROUND_CLOSEST_ULL(100000000000UL, frequency);
-}
-
-/* Check if the current step is and end marker */
-static inline int is_end_marker(struct music_step *step)
-{
-	return (step->freq == 0 && step->len == 0);
-}
-
-/**
- *  Transform note length into ms,
- * taking the beat of a quarter note as reference
- */
 static inline int calculate_delay_ms(unsigned int note_len, unsigned int qnote_ref)
 {
 	unsigned char duration = (note_len & 0x7f);
@@ -89,198 +55,159 @@ static inline int calculate_delay_ms(unsigned int note_len, unsigned int qnote_r
 	}
 	return total;
 }
-
-
-/* Function invoked when timer expires (fires) */
-static void fire_timer(struct timer_list *timer)
+static inline unsigned int freq_to_period_ns(unsigned int frequency)
 {
-    static char flag = 0;
-    char* message[] = {"Tic", "Tac"};
-
-    if (flag == 0)
-        printk(KERN_INFO "%s\n", message[0]);
-    else
-        printk(KERN_INFO "%s\n", message[1]);
-
-    flag = ~flag;
-
-    /* Re-activate the timer one second from now */
-    mod_timer(timer, jiffies + HZ);
+	if (frequency == 0)
+		return 0;
+	else
+		return DIV_ROUND_CLOSEST_ULL(100000000000UL, frequency);
 }
 
-
-/* Interrupt handler for button **/
-static irqreturn_t gpio_irq_handler(int irq, void *dev_id)
-{
-#ifdef MANUAL_DEBOUNCE
-  static unsigned long last_interrupt = 0;
-  unsigned long diff = jiffies - last_interrupt;
-  if (diff < 20)
-    return IRQ_HANDLED;
-
-  last_interrupt = jiffies;
-#endif
-
-  //led_state = ~led_state & ALL_LEDS_ON;
-  //set_pi_leds(led_state);
-  return IRQ_HANDLED;
-}
-
-/* Work's handler function */
-static void my_wq_function(struct work_struct *work)
-{
-	struct music_step melodic_line[] = {
-		{C4, 4}, {E4, 4}, {G4, 4}, {C5, 4}, 
-		{0, 2}, {C5, 4}, {G4, 4}, {E4, 4}, 
-		{C4, 4}, {0, 0} /* Terminator */
-	};
-	const int beat = 120; /* 120 quarter notes per minute */
-	struct music_step *next;
-
-	pwm_init_state(pwm_device, &pwm_state);
-
-	/* Play notes sequentially until end marker is found */
-	for (next = melodic_line; !is_end_marker(next); next++) {
-		/* Obtain period from frequency */
-		pwm_state.period = freq_to_period_ns(next->freq);
-
-		/**
-		 * Disable temporarily to allow repeating the same consecutive
-		 * notes in the melodic line
-		 **/
-		pwm_disable(pwm_device);
-
-		/* If period==0, its a rest (silent note) */
-		if (pwm_state.period > 0) {
-			/* Set duty cycle to 70 to maintain the same timbre */
-			pwm_set_relative_duty_cycle(&pwm_state, 70, 100);
-			pwm_state.enabled = true;
-			/* Apply state */
-			pwm_apply_state(pwm_device, &pwm_state);
-		} else {
-			/* Disable for rest */
-			pwm_disable(pwm_device);
-		}
-
-		/* Wait for duration of the note or reset */
-		msleep(calculate_delay_ms(next->len, beat));
-	}
-
-	pwm_disable(pwm_device);
-}
-
-static int __init gpioint_init(void)
-{
-  int i, j;
-  int err = 0;
-  unsigned char gpio_out_ok = 0;
-
-
-
-  /* Requesting Button's GPIO */
-  if ((err = gpio_request(GPIO_BUTTON, "button"))) {
-    pr_err("ERROR: GPIO %d request\n", GPIO_BUTTON);
-    goto err_handle;
-  }
-
-  /* Configure Button */
-  if (!(desc_button = gpio_to_desc(GPIO_BUTTON))) {
-    pr_err("GPIO %d is not valid\n", GPIO_BUTTON);
-    err = -EINVAL;
-    goto err_handle;
-  }
-
-  gpio_out_ok = 1;
-
-  //configure the BUTTON GPIO as input
-  gpiod_direction_input(desc_button);
-
-  /*
-  ** The lines below are commented because gpiod_set_debounce is not supported
-  ** in the Raspberry pi. Debounce is handled manually in this driver.
-  */
-#ifndef MANUAL_DEBOUNCE
-  //Debounce the button with a delay of 200ms
-  if (gpiod_set_debounce(desc_button, 200) < 0) {
-    pr_err("ERROR: gpio_set_debounce - %d\n", GPIO_BUTTON);
-    goto err_handle;
-  }
-#endif
-
-  //Get the IRQ number for our GPIO
-  gpio_button_irqn = gpiod_to_irq(desc_button);
-  pr_info("IRQ Number = %d\n", gpio_button_irqn);
-
-  if (request_irq(gpio_button_irqn,             //IRQ number
-                  gpio_irq_handler,   //IRQ handler
-                  IRQF_TRIGGER_RISING,        //Handler will be called in raising edge
-                  "button_leds",               //used to identify the device name using this IRQ
-                  NULL)) {                    //device id for shared IRQ
-    pr_err("my_device: cannot register IRQ ");
-    goto err_handle;
-  }
-
-  return 0;
-err_handle:
-
-  if (gpio_out_ok)
-    gpiod_put(desc_button);
-
-  return err;
-}
-
-static void __exit gpioint_exit(void) {
-  int i = 0;
-
-  free_irq(gpio_button_irqn, NULL);
-
-  gpiod_put(desc_button);
-}
-
-int init_timer_module( void )
-{
-    /* Create timer */
-    timer_setup(&my_timer, fire_timer, 0);
-    my_timer.expires = jiffies + HZ; /* Activate it one second from now */
-    /* Activate the timer for the first time */
-    add_timer(&my_timer);
+static int buzzer_open(struct inode *inode, struct file *file) {
+    if (!mutex_trylock(&buzzer_mutex)) {
+        return -EBUSY;
+    }
     return 0;
 }
 
+static int buzzer_release(struct inode *inode, struct file *file) {
+    mutex_unlock(&buzzer_mutex);
+    return 0;
+}
+static void parse_notes(const char *input_buffer, struct music_step *steps, size_t *step_count)
+{
+    char *local_buffer;
+    char *note;
+    size_t index = 0;
 
-void cleanup_timer_module( void ) {
-    /* Wait until completion of the timer function (if it's currently running) and delete timer */
-    del_timer_sync(&my_timer);
+    local_buffer = kstrdup(input_buffer, GFP_KERNEL);
+    if (!local_buffer) {
+        printk(KERN_ERR "Failed to allocate memory for local buffer\n");
+        *step_count = 0;
+        return;
+    }
+
+
+    while ((note = strsep(&local_buffer, ",")) != NULL) {
+        if (sscanf(note, "%d:%x", &steps[index].frequency, &steps[index].duration) == 2) {
+            index++;
+        }
+    }
+
+    *step_count = index;
+    kfree(local_buffer);
+}
+static void my_wq_function(struct work_struct *work)
+{
+    static struct music_step steps[100];
+    size_t step_count;
+    const int beat = 120;
+
+    parse_notes(melody_buffer, steps, &step_count);
+
+    pwm_init_state(pwm_device, &pwm_state);
+    size_t i;
+    for (i = 0; i < step_count; i++) {
+        pwm_state.period = freq_to_period_ns(steps[i].frequency);
+
+        pwm_disable(pwm_device);
+
+        if (pwm_state.period > 0) {
+            pwm_set_relative_duty_cycle(&pwm_state, 70, 100);
+            pwm_state.enabled = true;
+            pwm_apply_state(pwm_device, &pwm_state);
+        } else {
+            pwm_disable(pwm_device);
+        }
+
+        msleep(calculate_delay_ms(steps[i].duration, beat));
+        printk(KERN_INFO "Printeando nota: %d\n", steps[i].frequency);
+    }
+
+    pwm_disable(pwm_device);
 }
 
-static int __init pwm_module_init(void)
-{
-	/* Request utilization of PWM0 device */
+
+static ssize_t buzzer_write(struct file *file, const char __user *buffer, size_t len, loff_t *offset) {
+    if (len > PAGE_SIZE) {
+        return -EINVAL;
+    }
+
+    melody_buffer = kzalloc(len + 1, GFP_KERNEL);
+    if (!melody_buffer) {
+        return -ENOMEM;
+    }
+
+    if (copy_from_user(melody_buffer, buffer, len)) {
+        kfree(melody_buffer);
+        return -EFAULT;
+    }
+    printk(KERN_INFO "Se ha detectado escritura");
+    schedule_work(&my_work);
+    return len;
+}
+
+static struct file_operations fops = {
+    .owner = THIS_MODULE,
+    .write = buzzer_write,
+    .open = buzzer_open,
+    .release = buzzer_release,
+};
+static struct miscdevice buzzer_misc = {
+	.minor = MISC_DYNAMIC_MINOR, /* kernel dynamically assigns a free minor# */
+	.name = DEVICE_NAME,		 /* when misc_register() is invoked, the kernel
+								  * will auto-create device file;
+								  * also populated within /sys/class/misc/ and /sys/devices/virtual/misc/ */
+	.mode = 0666,				 /* ... dev node perms set as specified here */
+	.fops = &fops,				 /* connect to this driver's 'functionality' */
+};
+
+static int __init buzzer_init(void) {
+    int result;
+    int err = 0;
+    struct device *device;
+
+    /* Request utilization of PWM0 device */
 	pwm_device = pwm_request(0, PWM_DEVICE_NAME);
 
 	if (IS_ERR(pwm_device))
 		return PTR_ERR(pwm_device);
 
-	/* Initialize work structure (with function) */
+
+    err = misc_register(&buzzer_misc);
+	if (err) {
+        pr_err("Failed to register misc device\n");
+        pwm_free(pwm_device);
+        return err;
+    }
+
+
+	device = buzzer_misc.this_device;
+
+	dev_info(device, "Display7s driver registered succesfully. To talk to\n");
+	dev_info(device, "the driver try to cat and echo to /dev/%s.\n", DEVICE_NAME);
+	dev_info(device, "Remove the module when done.\n");
+
+    /* Initialize work structure (with function) */
 	INIT_WORK(&my_work, my_wq_function);
 
-	/* Enqueue work */
-	schedule_work(&my_work);
+    mutex_init(&buzzer_mutex);
 
-	return 0;
+    printk(KERN_INFO "buzzer: Module loaded\n");
+    return 0;
 }
 
-static void __exit pwm_module_exit(void)
-{
-	/* Wait until defferred work has finished */
+static void __exit buzzer_exit(void) {
 	flush_work(&my_work);
-
-	/* Release PWM device */
 	pwm_free(pwm_device);
+    misc_deregister(&buzzer_misc);
+    mutex_destroy(&buzzer_mutex);
+    printk(KERN_INFO "buzzer: Module unloaded\n");
 }
 
-module_init(pwm_module_init);
-module_exit(pwm_module_exit);
+module_init(buzzer_init);
+module_exit(buzzer_exit);
 
 MODULE_LICENSE("GPL");
-MODULE_DESCRIPTION("PWM test");
+MODULE_AUTHOR("Tu Nombre");
+MODULE_DESCRIPTION("Driver SMP-safe para el buzzer de la placa Bee v2.0");
